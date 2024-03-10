@@ -1,11 +1,12 @@
 {
-    "name": "node-tuntap"
-  , "version": "0.0.1"
-  , "private": true
-  , "dependencies": {
-    "sprintf": "",
-    "put": "",
-    "binary": "",
-    "buffers": ""
-  }
+    "name": "node-tuntap",
+    "version": "0.0.2",
+    "private": true,
+    "dependencies": {
+        "binary": "",
+        "bindings": "^1.5.0",
+        "buffers": "",
+        "put": "",
+        "sprintf": ""
+    }
 }

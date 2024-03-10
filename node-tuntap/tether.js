@@ -1,25 +1,12 @@
 // Copyright 2011 ClockworkMod, LLC.
 
-var fs = require('fs');
-var child_process = require('child_process');
-var binary = require('binary');
 var put = require('put');
-var events = require('events');
-var net = require('net');
-var sprintf = require('sprintf').sprintf;
-var util = require("util");
-var dgram = require('dgram');
 var buffers = require('buffers');
 var os = require('os');
-var path = require('path');
-var assert = require('assert');
 var rl = require('readline');
 var cluster = require('cluster');
 
 var adb;
-
-var protocols = require('./protocols');
-var platform = require('./platform');
 
 var tun = require('./tuntap');
 
@@ -29,40 +16,20 @@ function createTun(withWorker) {
   console.log('Opening tun device.');
   if (!withWorker || cluster.isMaster) {
     try {
-      fs.statSync('/dev/tun1');
-      t = new tun.tun('/dev/tun1', '10.0.0.1', { noCatcher: withWorker });
+      t = new tun.tun('10.0.0.1', { noCatcher: withWorker });
     }
     catch (e) {
-      try {
-        fs.statSync('/dev/net/tun');
-        t = new tun.tun('/dev/net/tun', '10.0.0.1', { noCatcher: withWorker });
-      }
-      catch (e) {
-        try {
-          t = new tun.tun(null, '10.0.0.1', { noCatcher: withWorker });
-        }
-        catch (e) {
-          console.log('unable to open tun/tap device.');
-          console.log(e);
-          process.exit();
-        }
-      }
+      console.log('unable to open tun/tap device.');
+      console.log(e);
+      process.exit();
     }
     
     if (withWorker) {
       function forker() {
-        // not having this console.log here makes Windows crap out on the fork.
-        // hangs the process. stdout needs pumping? Dunno.
-        console.log('Forking worker.');
         t.setCatcherWorker(myWorker = cluster.fork());
       }
-      if (os.platform() == 'win32') {
-        console.log('Waiting for interface to get ready... (forker, waiting 5 seconds)');
-        setTimeout(forker, 5000);
-      }
-      else {
-        forker();
-      }
+
+      forker();
     }
 
     t.on('ready', function() {
@@ -206,8 +173,10 @@ function createTun(withWorker) {
           console.log(err);
       });
     }
-    connection.close = function() {
-      connection.socket.close();
+    connection.close = function () {
+      if (connection.socket.handle != null) {
+        connection.socket.close();
+      }
     }
     connection.ready = function() {
     }
@@ -241,7 +210,7 @@ if (process.env.NO_TUNWORKER)
   useWorker = false;
 createTun(useWorker);
 if (cluster.isMaster) {
-  var inputInterface = rl.createInterface(process.stdin, process.stdout, null);
+  var inputInterface = rl.createInterface(process.stdin, process.stdout);
 
   inputInterface.on('line', function(line) {
     line = line.trim();

@@ -33,6 +33,7 @@
   <ItemGroup>
     <Content Include="adb.js" />
     <Content Include="interfaces.js" />
+    <Content Include="nodetap.js" />
     <Content Include="package.json" />
     <Content Include="platform.js" />
     <Content Include="protocols.js" />

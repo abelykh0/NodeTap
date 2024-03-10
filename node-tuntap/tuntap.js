@@ -1,23 +1,17 @@
 // Copyright 2011 ClockworkMod, LLC.
 
-var fs = require('fs');
-var child_process = require('child_process');
 var binary = require('binary');
-var put = require('put');
 var events = require('events');
 var net = require('net');
-var sprintf = require('sprintf').sprintf;
-var util = require("util");
 var dgram = require('dgram');
-var buffers = require('buffers');
 var os = require('os');
 var path = require('path');
 var assert = require('assert');
-var rl = require('readline');
 var cluster = require('cluster');
 
 var protocols = require('./protocols');
 var platform = require('./platform');
+var nodetap = require('./nodetap');
 
 String.prototype.trim=function(){return this.replace(/^\s\s*/, '').replace(/\s\s*$/, '');};
 
@@ -82,10 +76,13 @@ function trimConnection(c) {
   };
 }
 
-function tun(device, tunIP, options) {
+function setupTun() {
+    return nodetap.setupTun();
+}
+
+function tun(tunIP, options) {
   options = options || {};
   var tunIPValue = this.IPValue = getIPValue(tunIP);
-  this.device = device;
   this.IP = tunIP;
   var tunthis = this;
   var tunFile;
@@ -94,7 +91,7 @@ function tun(device, tunIP, options) {
   this.close = function(cb) {
     tunthis.removeAllListeners();
     if (tunFile) {
-      fs.closeSync(tunFile);
+      tunFile.close();
       tunFile = null;
     }
     if (tunthis.tcpCatcher) {
@@ -107,22 +104,23 @@ function tun(device, tunIP, options) {
     platform.runScript('interface-shutdown', [path.basename(device)], cb);
   }
   
-  console.log('Opening tun device: ' + device);
-  os.setupTun(function(err, fd) {
-    tunFile = fd;
-    if (err) {
-      console.log('Unable to open tun device! Exiting.');
-      console.log(err);
-      process.exit(1);
-      return;
-    }
+  console.log('Opening tun device');
+  tunFile = setupTun();
 
+  //if (err) {
+  //  console.log('Unable to open tun device! Exiting.');
+  //  console.log(err);
+  //  process.exit(1);
+  //  return;
+  //}
+
+  {
     var packetWriting = false;
     var packetQueue = [];
     function packetPump(packet) {
       assert(packet != null || !packetWriting);
       if (packet && packetQueue.length > 0) {
-        var buffer = new Buffer(packet.length);
+        var buffer = Buffer.alloc(packet.length);
         packet.copy(buffer, 0, 0, packet.length);
         packetQueue.push(buffer);
         packet = null;
@@ -137,7 +135,7 @@ function tun(device, tunIP, options) {
       if (!tunFile)
         return;
       packetWriting = true;
-      fs.write(tunFile, packet, 0, packet.length, null, function(err, written, buffer) {
+      tunFile.write(packet, packet.length, function(err, written, buffer) {
         if (written != buffer.length || written != packet.length) {
           console.log('wtf');
           console.log(written);
@@ -151,7 +149,7 @@ function tun(device, tunIP, options) {
     
     function queuePacket(packet) {
       if (os.platform() == 'win32') {
-        fs.writeSync(tunFile, packet, 0, packet.length);
+        tunFile.writeSync(packet, packet.length);
       }
       else {
         packetPump(packet);
@@ -190,9 +188,6 @@ function tun(device, tunIP, options) {
     protocolConnections[protocols.udp] = udpConnections;
     
     function rewritePacket(connections, packet, source, sourcePort, destination, destinationPort, vars) {
-      var headerLength = (vars.first & 0xf) * 4;
-      var payloadLength = vars.totalLength - headerLength;
-
       // console.log(sprintf('original checksum: %x', packet.readUInt16BE(10)));
       packet.writeUInt32BE(source, 12);
       packet.writeUInt32BE(destination, 16);
@@ -200,6 +195,8 @@ function tun(device, tunIP, options) {
       packet.writeUInt16BE(0, 10);
       
       var headerLength = (vars.first & 0xf) * 4;
+      var payloadLength = vars.totalLength - headerLength;
+
       var ipChecksum = calculateIPChecksum(packet, headerLength);
       // write the new checksum
       packet.writeUInt16LE(ipChecksum, 10);
@@ -207,7 +204,7 @@ function tun(device, tunIP, options) {
       // ipChecksum = calculateIPChecksum(packet, headerLength);
       // console.log(sprintf('verified checksum: %x', ipChecksum));
       
-      var stashedIPHeader = new Buffer(headerLength);
+      var stashedIPHeader = Buffer.alloc(headerLength);
       packet.copy(stashedIPHeader, 0, 0, headerLength);
       // console.log(stashedIPHeader);
 
@@ -247,7 +244,7 @@ function tun(device, tunIP, options) {
       var acceptInfo = c.acceptInfo;
       delete c.acceptInfo;
       var vars = acceptInfo.vars;
-      var packet = new Buffer(acceptInfo.packet, 'base64');
+      var packet = Buffer.from(acceptInfo.packet, 'base64');
       var connections = protocolConnections[c.protocol];
       connections.add(c, vars.sourcePort);
       // console.log('master table size (' + connections.type + '): ' + Object.keys(connections).length);
@@ -399,10 +396,6 @@ function tun(device, tunIP, options) {
       .word32be('destination');
 
       var vars = parser.vars;
-
-      var source = vars.source;
-
-      var version = vars.first >> 4;
       var headerLength = (vars.first & 0xf) * 4;
 
       // skip the first 20 bytes
@@ -436,32 +429,26 @@ function tun(device, tunIP, options) {
       
       // tunthis.tcpCatcher = tcpCatcher;
 
-      var b = new Buffer(65536);
+      var b = Buffer.alloc(65536);
 
       function readCallback(err, bytesRead, buffer) {
         reader(err, bytesRead, buffer);
         // console.log('actually read from device was: '  + bytesRead);
 
         if (tunFile)
-          fs.read(tunFile, b, 0, b.length, null, readCallback);
+          tunFile.read(b, b.length, readCallback);
       }
 
       console.log('Reading tun/tap device... ');
-      fs.read(tunFile, b, 0, b.length, null, readCallback);
+      tunFile.read(b, b.length, readCallback);
     }
     
     function postSetup() {
-      if (os.platform() == 'win32') {
-        console.log('Waiting for interface to get ready... (postSetup, waiting 5 seconds)');
-        setTimeout(postSetupInternal, 5000);
-      }
-      else {
-        postSetupInternal();
-      }
+      postSetupInternal();
     }
 
-    platform.runScript('interface-setup', [tunIP, path.basename(device)], postSetup);
-  });
+    postSetup();
+  }
   
   tunthis.setCatcherWorker = function(worker) {
     catcherEmitter.on('tcp-outgoing', function(c) {
@@ -512,15 +499,17 @@ function startCatcher(tunIP, tunthis, catcherEmitter) {
   catcherEmitter.on('udp-outgoing', function(c) {
     c.accept = function() {
       var socket = dgram.createSocket("udp4");
-      socket.bind(0, tunIP);
+      c.socket = socket;
+      socket.bind({ address: tunIP, port: 0, exclusive: true }, function () {
+        c.catcherPort = socket.address().port;
+        // console.log('catcher port: ' + connection.catcherPort);
+        tunthis.emit('udp-connect', c);
+        tunthis.emit('tun-accept', trimConnection(c));
+      });
+
       socket.on('close', function() {
         tunthis.emit('tun-close', trimConnection(c));
       });
-      c.socket = socket;
-      c.catcherPort = socket.address().port;
-      // console.log('catcher port: ' + connection.catcherPort);
-      tunthis.emit('udp-connect', c);
-      tunthis.emit('tun-accept', trimConnection(c));
     }
     tunthis.emit('udp-outgoing', c);
   });

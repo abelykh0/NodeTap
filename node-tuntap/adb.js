@@ -4,7 +4,6 @@ var buffers = require('buffers');
 var net = require('net');
 var put = require('put');
 var binary = require('binary');
-var assert = require('assert');
 var path = require('path');
 
 var protocols = require('./protocols');
@@ -113,7 +112,6 @@ function makeRelayForDevice(adbDevice) {
     }
   }
   
-
   function connectRelay(connection) {
     var socket = connection.socket;
     var identifier = connection.identifier;
@@ -254,7 +252,7 @@ function makeRelayForDevice(adbDevice) {
     if (payloadRemaining > 0) {
       // console.log('relay write: ' + relayData.length + 'available for ' + payloadRemaining + ' remaining');
       taken = Math.min(relayData.length, payloadRemaining);
-      var prevLength = relayData.length;
+      // var prevLength = relayData.length;
       var writing = relayData.splice(0, taken).toBuffer();
       payloadRemaining -= taken;
       // doWindow(taken);
