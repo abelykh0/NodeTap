@@ -1,5 +1,6 @@
 var os = require('os');
 var fs = require('fs');
+var platform = require('./platform');
 
 if (os.platform() == 'win32') {
   var nodetapwindows = require('bindings')('./nodetapwindows');
@@ -54,8 +55,7 @@ exports.setupTun = function setupTun() {
     return result;
   }
   else {
-    var handle = nodetaplinux.setupTun();
-
+    var handle = nodetaplinux.openTap();
     var result = new NodeTap(handle);
 
     result.read = function (packet, length, func) {
@@ -75,8 +75,11 @@ exports.setupTun = function setupTun() {
     }
 
     result.close = function () {
+      platform.runScript('interface-shutdown', ["tun"], cb);
       return fs.closeSync(this._handle);
     }
+
+    //platform.runScript('interface-setup', ["10.0.0.1", "tun"], postSetup);
 
     return result;
   }

@@ -1,5 +1,7 @@
 bin/
 obj/
 x64/
+Release/
 node_modules/
 .vs
+*.user
